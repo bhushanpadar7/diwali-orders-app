@@ -1,7 +1,8 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
+import gspread
+from google.oauth2.service_account import Credentials
 import json
 
 # Page configuration
@@ -12,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better mobile experience
+# Custom CSS
 st.markdown("""
     <style>
     .big-font {
@@ -24,166 +25,221 @@ st.markdown("""
         height: 50px;
         font-size: 18px;
     }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-    }
     </style>
     """, unsafe_allow_html=True)
 
-# Initialize database
-def init_db():
-    conn = sqlite3.connect('diwali_orders.db')
-    c = conn.cursor()
-    
-    # Create items table
-    c.execute('''CREATE TABLE IF NOT EXISTS items
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT UNIQUE NOT NULL,
-                  rate REAL NOT NULL,
-                  stock REAL DEFAULT 0)''')
-    
-    # Create orders table
-    c.execute('''CREATE TABLE IF NOT EXISTS orders
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  customer_name TEXT NOT NULL,
-                  customer_phone TEXT,
-                  customer_address TEXT,
-                  delivery_date TEXT NOT NULL,
-                  status TEXT DEFAULT 'Active',
-                  payment_status TEXT DEFAULT 'Pending',
-                  order_date TEXT NOT NULL,
-                  notes TEXT)''')
-    
-    # Create order items table
-    c.execute('''CREATE TABLE IF NOT EXISTS order_items
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  order_id INTEGER,
-                  item_name TEXT NOT NULL,
-                  quantity REAL NOT NULL,
-                  rate REAL NOT NULL,
-                  FOREIGN KEY (order_id) REFERENCES orders(id))''')
-    
-    # Insert default items if not exists
-    default_items = [
-        ('Besan Laddu', 580),
-        ('Chakli',400),
-        ('Salty Shankarpade', 380),
-        ('Sweet Shankarpade', 380),
-        ('Chivda', 290),
-        ('Shev (Masala)', 380),
-        ('Shev (Simple)', 380),
-        ('Karanji', 540),
-        ('Anarse', 760)
-    ]
-    
-    for item_name, rate in default_items:
-        c.execute('INSERT OR IGNORE INTO items (name, rate, stock) VALUES (?, ?, ?)',
-                  (item_name, rate, 0))
-    
-    conn.commit()
-    conn.close()
+# Initialize Google Sheets connection
+@st.cache_resource
+def init_connection():
+    try:
+        # Get credentials from Streamlit secrets
+        credentials_dict = dict(st.secrets["gcp_service_account"])
+        
+        scope = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        
+        credentials = Credentials.from_service_account_info(
+            credentials_dict,
+            scopes=scope
+        )
+        
+        client = gspread.authorize(credentials)
+        return client
+    except Exception as e:
+        st.error(f"Error connecting to Google Sheets: {e}")
+        st.info("Please check your credentials in Streamlit secrets")
+        return None
 
-# Database functions
+# Connect to specific spreadsheet
+def get_spreadsheet():
+    try:
+        client = init_connection()
+        if client:
+            sheet_url = st.secrets["spreadsheet_url"]
+            return client.open_by_url(sheet_url)
+        return None
+    except Exception as e:
+        st.error(f"Error opening spreadsheet: {e}")
+        return None
+
+# Get all items
 def get_all_items():
-    conn = sqlite3.connect('diwali_orders.db')
-    df = pd.read_sql_query("SELECT * FROM items ORDER BY name", conn)
-    conn.close()
-    return df
+    try:
+        spreadsheet = get_spreadsheet()
+        if spreadsheet:
+            worksheet = spreadsheet.worksheet("items")
+            data = worksheet.get_all_records()
+            return pd.DataFrame(data)
+        return pd.DataFrame(columns=['name', 'rate', 'stock'])
+    except Exception as e:
+        st.error(f"Error reading items: {e}")
+        return pd.DataFrame(columns=['name', 'rate', 'stock'])
 
+# Get all orders
 def get_all_orders(status=None):
-    conn = sqlite3.connect('diwali_orders.db')
-    if status:
-        df = pd.read_sql_query("SELECT * FROM orders WHERE status=? ORDER BY delivery_date", 
-                               conn, params=(status,))
-    else:
-        df = pd.read_sql_query("SELECT * FROM orders ORDER BY delivery_date", conn)
-    conn.close()
-    return df
+    try:
+        spreadsheet = get_spreadsheet()
+        if spreadsheet:
+            worksheet = spreadsheet.worksheet("orders")
+            data = worksheet.get_all_records()
+            df = pd.DataFrame(data)
+            
+            if len(df) > 0:
+                if status:
+                    df = df[df['status'] == status]
+                return df.sort_values('delivery_date')
+            return df
+        return pd.DataFrame(columns=['id', 'customer_name', 'customer_phone', 'customer_address', 
+                                    'delivery_date', 'status', 'payment_status', 'order_date', 'notes'])
+    except Exception as e:
+        st.error(f"Error reading orders: {e}")
+        return pd.DataFrame()
 
+# Get order items
 def get_order_items(order_id):
-    conn = sqlite3.connect('diwali_orders.db')
-    df = pd.read_sql_query("SELECT * FROM order_items WHERE order_id=?", 
-                           conn, params=(order_id,))
-    conn.close()
-    return df
+    try:
+        spreadsheet = get_spreadsheet()
+        if spreadsheet:
+            worksheet = spreadsheet.worksheet("order_items")
+            data = worksheet.get_all_records()
+            df = pd.DataFrame(data)
+            
+            if len(df) > 0:
+                return df[df['order_id'] == order_id]
+            return df
+        return pd.DataFrame(columns=['order_id', 'item_name', 'quantity', 'rate'])
+    except Exception as e:
+        st.error(f"Error reading order items: {e}")
+        return pd.DataFrame()
 
+# Add new order
 def add_order(customer_name, phone, address, delivery_date, items_data, payment_status, notes):
-    conn = sqlite3.connect('diwali_orders.db')
-    c = conn.cursor()
-    
-    order_date = datetime.now().strftime('%Y-%m-%d')
-    
-    c.execute('''INSERT INTO orders 
-                 (customer_name, customer_phone, customer_address, delivery_date, 
-                  order_date, payment_status, notes, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Active')''',
-              (customer_name, phone, address, delivery_date, order_date, payment_status, notes))
-    
-    order_id = c.lastrowid
-    
-    for item in items_data:
-        c.execute('''INSERT INTO order_items (order_id, item_name, quantity, rate)
-                     VALUES (?, ?, ?, ?)''',
-                  (order_id, item['name'], item['quantity'], item['rate']))
-    
-    conn.commit()
-    conn.close()
-    return order_id
+    try:
+        spreadsheet = get_spreadsheet()
+        if not spreadsheet:
+            return None
+        
+        # Get next order ID
+        orders_ws = spreadsheet.worksheet("orders")
+        existing_orders = orders_ws.get_all_records()
+        next_id = max([o['id'] for o in existing_orders], default=0) + 1
+        
+        order_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # Add to orders sheet
+        new_order = [next_id, customer_name, phone or "", address or "", 
+                    delivery_date, "Active", payment_status, order_date, notes or ""]
+        orders_ws.append_row(new_order)
+        
+        # Add to order_items sheet
+        items_ws = spreadsheet.worksheet("order_items")
+        for item in items_data:
+            item_row = [next_id, item['name'], item['quantity'], item['rate']]
+            items_ws.append_row(item_row)
+        
+        return next_id
+    except Exception as e:
+        st.error(f"Error adding order: {e}")
+        return None
 
+# Update order status
 def update_order_status(order_id, new_status):
-    conn = sqlite3.connect('diwali_orders.db')
-    c = conn.cursor()
-    c.execute('UPDATE orders SET status=? WHERE id=?', (new_status, order_id))
-    conn.commit()
-    conn.close()
+    try:
+        spreadsheet = get_spreadsheet()
+        if spreadsheet:
+            worksheet = spreadsheet.worksheet("orders")
+            cell = worksheet.find(str(order_id))
+            
+            if cell:
+                # Status is in column 6 (F)
+                worksheet.update_cell(cell.row, 6, new_status)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error updating status: {e}")
+        return False
 
+# Update stock
 def update_stock(item_name, quantity):
-    conn = sqlite3.connect('diwali_orders.db')
-    c = conn.cursor()
-    c.execute('UPDATE items SET stock=? WHERE name=?', (quantity, item_name))
-    conn.commit()
-    conn.close()
+    try:
+        spreadsheet = get_spreadsheet()
+        if spreadsheet:
+            worksheet = spreadsheet.worksheet("items")
+            cell = worksheet.find(item_name)
+            
+            if cell:
+                # Stock is in column 3 (C)
+                worksheet.update_cell(cell.row, 3, quantity)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error updating stock: {e}")
+        return False
 
+# Delete order
 def delete_order(order_id):
-    conn = sqlite3.connect('diwali_orders.db')
-    c = conn.cursor()
-    c.execute('DELETE FROM order_items WHERE order_id=?', (order_id,))
-    c.execute('DELETE FROM orders WHERE id=?', (order_id,))
-    conn.commit()
-    conn.close()
+    try:
+        spreadsheet = get_spreadsheet()
+        if spreadsheet:
+            # Delete from orders
+            orders_ws = spreadsheet.worksheet("orders")
+            cell = orders_ws.find(str(order_id))
+            if cell:
+                orders_ws.delete_rows(cell.row)
+            
+            # Delete from order_items
+            items_ws = spreadsheet.worksheet("order_items")
+            all_data = items_ws.get_all_values()
+            rows_to_delete = []
+            
+            for idx, row in enumerate(all_data[1:], start=2):  # Skip header
+                if str(row[0]) == str(order_id):
+                    rows_to_delete.append(idx)
+            
+            # Delete in reverse order to maintain row numbers
+            for row_num in reversed(rows_to_delete):
+                items_ws.delete_rows(row_num)
+            
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error deleting order: {e}")
+        return False
 
+# Get stock vs orders analysis
 def get_stock_vs_orders():
-    conn = sqlite3.connect('diwali_orders.db')
-    
-    # Get current stock
-    stock_df = pd.read_sql_query("SELECT name, stock FROM items", conn)
-    
-    # Get required quantities from active orders
-    required_df = pd.read_sql_query("""
-        SELECT oi.item_name, SUM(oi.quantity) as required
-        FROM order_items oi
-        JOIN orders o ON oi.order_id = o.id
-        WHERE o.status = 'Active'
-        GROUP BY oi.item_name
-    """, conn)
-    
-    conn.close()
-    
-    # Merge the dataframes
-    result = stock_df.merge(required_df, left_on='name', right_on='item_name', how='left')
-    result['required'] = result['required'].fillna(0)
-    result['difference'] = result['stock'] - result['required']
-    
-    return result[['name', 'stock', 'required', 'difference']]
-
-# Initialize database
-init_db()
+    try:
+        items_df = get_all_items()
+        active_orders = get_all_orders('Active')
+        
+        if len(items_df) == 0:
+            return pd.DataFrame(columns=['name', 'stock', 'required', 'difference'])
+        
+        # Calculate required quantities
+        required = {}
+        if len(active_orders) > 0:
+            for _, order in active_orders.iterrows():
+                order_items = get_order_items(order['id'])
+                for _, item in order_items.iterrows():
+                    item_name = item['item_name']
+                    qty = item['quantity']
+                    required[item_name] = required.get(item_name, 0) + qty
+        
+        # Create result dataframe
+        result = items_df.copy()
+        result['required'] = result['name'].map(required).fillna(0)
+        result['difference'] = result['stock'] - result['required']
+        
+        return result[['name', 'stock', 'required', 'difference']]
+    except Exception as e:
+        st.error(f"Error in stock analysis: {e}")
+        return pd.DataFrame()
 
 # Sidebar navigation
 st.sidebar.title("🪔 Diwali Orders")
+st.sidebar.info("✅ Connected to Google Sheets - Your data is safe!")
 page = st.sidebar.radio("Navigation", 
                         ["📊 Dashboard", "📝 New Order", "📋 All Orders", 
                          "📦 Inventory", "📈 Stock Analysis"])
@@ -192,7 +248,6 @@ page = st.sidebar.radio("Navigation",
 if page == "📊 Dashboard":
     st.title("📊 Dashboard")
     
-    # Get statistics
     all_orders = get_all_orders()
     active_orders = get_all_orders('Active')
     completed_orders = get_all_orders('Completed')
@@ -200,7 +255,6 @@ if page == "📊 Dashboard":
     today = date.today().strftime('%Y-%m-%d')
     todays_deliveries = active_orders[active_orders['delivery_date'] == today] if len(active_orders) > 0 else pd.DataFrame()
     
-    # Display metrics in columns
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -211,38 +265,40 @@ if page == "📊 Dashboard":
         st.metric("📅 Today's Deliveries", len(todays_deliveries))
     with col4:
         total_revenue = 0
-        for _, order in active_orders.iterrows():
-            items = get_order_items(order['id'])
-            total_revenue += (items['quantity'] * items['rate']).sum()
+        if len(active_orders) > 0:
+            for _, order in active_orders.iterrows():
+                items = get_order_items(order['id'])
+                if len(items) > 0:
+                    total_revenue += (items['quantity'] * items['rate']).sum()
         st.metric("💰 Active Orders Value", f"₹{total_revenue:,.0f}")
     
     st.divider()
     
-    # Today's Deliveries
     if len(todays_deliveries) > 0:
         st.subheader("📅 Today's Deliveries")
         for _, order in todays_deliveries.iterrows():
-            with st.expander(f"👤 {order['customer_name']} - ₹{order['id']}"):
+            with st.expander(f"👤 {order['customer_name']}"):
                 items = get_order_items(order['id'])
-                st.dataframe(items[['item_name', 'quantity', 'rate']], hide_index=True)
-                total = (items['quantity'] * items['rate']).sum()
-                st.write(f"**Total: ₹{total:,.2f}**")
+                if len(items) > 0:
+                    st.dataframe(items[['item_name', 'quantity', 'rate']], hide_index=True)
+                    total = (items['quantity'] * items['rate']).sum()
+                    st.write(f"**Total: ₹{total:,.2f}**")
     
     st.divider()
     
-    # Low stock alerts
     st.subheader("⚠️ Stock Alerts")
     stock_data = get_stock_vs_orders()
-    low_stock = stock_data[stock_data['difference'] < 5]
-    
-    if len(low_stock) > 0:
-        for _, item in low_stock.iterrows():
-            if item['difference'] < 0:
-                st.error(f"🔴 {item['name']}: Short by {abs(item['difference']):.1f} kg!")
-            else:
-                st.warning(f"🟡 {item['name']}: Only {item['stock']:.1f} kg remaining")
-    else:
-        st.success("✅ All items have sufficient stock!")
+    if len(stock_data) > 0:
+        low_stock = stock_data[stock_data['difference'] < 5]
+        
+        if len(low_stock) > 0:
+            for _, item in low_stock.iterrows():
+                if item['difference'] < 0:
+                    st.error(f"🔴 {item['name']}: Short by {abs(item['difference']):.1f} kg!")
+                else:
+                    st.warning(f"🟡 {item['name']}: Only {item['stock']:.1f} kg remaining")
+        else:
+            st.success("✅ All items have sufficient stock!")
 
 # New Order Page
 elif page == "📝 New Order":
@@ -269,25 +325,25 @@ elif page == "📝 New Order":
         items_df = get_all_items()
         selected_items = []
         
-        for _, item in items_df.iterrows():
-            col1, col2, col3 = st.columns([3, 2, 2])
-            with col1:
-                st.write(f"**{item['name']}**")
-            with col2:
-                st.write(f"₹{item['rate']}/kg")
-            with col3:
-                qty = st.number_input(f"Qty (kg)", min_value=0.0, max_value=1000.0, 
-                                     step=0.5, key=f"qty_{item['id']}", label_visibility="collapsed")
-                if qty > 0:
-                    selected_items.append({
-                        'name': item['name'],
-                        'quantity': qty,
-                        'rate': item['rate']
-                    })
+        if len(items_df) > 0:
+            for idx, item in items_df.iterrows():
+                col1, col2, col3 = st.columns([3, 2, 2])
+                with col1:
+                    st.write(f"**{item['name']}**")
+                with col2:
+                    st.write(f"₹{item['rate']}/kg")
+                with col3:
+                    qty = st.number_input(f"Qty (kg)", min_value=0.0, max_value=1000.0, 
+                                         step=0.5, key=f"qty_{idx}", label_visibility="collapsed")
+                    if qty > 0:
+                        selected_items.append({
+                            'name': item['name'],
+                            'quantity': qty,
+                            'rate': item['rate']
+                        })
         
         st.divider()
         
-        # Calculate total
         if selected_items:
             total = sum(item['quantity'] * item['rate'] for item in selected_items)
             st.subheader(f"💰 Total Amount: ₹{total:,.2f}")
@@ -303,8 +359,9 @@ elif page == "📝 New Order":
                 order_id = add_order(customer_name, customer_phone, customer_address, 
                                    delivery_date.strftime('%Y-%m-%d'), selected_items, 
                                    payment_status, notes)
-                st.success(f"✅ Order #{order_id} created successfully!")
-                st.balloons()
+                if order_id:
+                    st.success(f"✅ Order #{order_id} created successfully!")
+                    st.balloons()
 
 # All Orders Page
 elif page == "📋 All Orders":
@@ -346,31 +403,33 @@ elif page == "📋 All Orders":
                     
                     with col2:
                         if st.button("✅ Complete", key=f"complete_{order['id']}", use_container_width=True):
-                            update_order_status(order['id'], 'Completed')
-                            st.rerun()
+                            if update_order_status(order['id'], 'Completed'):
+                                st.success("Order completed!")
+                                st.rerun()
                         
                         if st.button("🗑️ Delete", key=f"delete_{order['id']}", use_container_width=True):
-                            delete_order(order['id'])
-                            st.rerun()
+                            if delete_order(order['id']):
+                                st.success("Order deleted!")
+                                st.rerun()
                     
                     st.divider()
                     
-                    # Order items
                     items = get_order_items(order['id'])
-                    items['Amount'] = items['quantity'] * items['rate']
-                    
-                    st.dataframe(
-                        items[['item_name', 'quantity', 'rate', 'Amount']].rename(columns={
-                            'item_name': 'Item',
-                            'quantity': 'Qty (kg)',
-                            'rate': 'Rate (₹/kg)'
-                        }),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                    
-                    total = items['Amount'].sum()
-                    st.markdown(f"### **Total: ₹{total:,.2f}**")
+                    if len(items) > 0:
+                        items['Amount'] = items['quantity'] * items['rate']
+                        
+                        st.dataframe(
+                            items[['item_name', 'quantity', 'rate', 'Amount']].rename(columns={
+                                'item_name': 'Item',
+                                'quantity': 'Qty (kg)',
+                                'rate': 'Rate (₹/kg)'
+                            }),
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                        total = items['Amount'].sum()
+                        st.markdown(f"### **Total: ₹{total:,.2f}**")
         else:
             st.info("No active orders found!")
     
@@ -384,24 +443,26 @@ elif page == "📋 All Orders":
                     st.write(f"**💳 Payment:** {order['payment_status']}")
                     
                     items = get_order_items(order['id'])
-                    items['Amount'] = items['quantity'] * items['rate']
-                    
-                    st.dataframe(
-                        items[['item_name', 'quantity', 'rate', 'Amount']].rename(columns={
-                            'item_name': 'Item',
-                            'quantity': 'Qty (kg)',
-                            'rate': 'Rate (₹/kg)'
-                        }),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                    
-                    total = items['Amount'].sum()
-                    st.markdown(f"### **Total: ₹{total:,.2f}**")
+                    if len(items) > 0:
+                        items['Amount'] = items['quantity'] * items['rate']
+                        
+                        st.dataframe(
+                            items[['item_name', 'quantity', 'rate', 'Amount']].rename(columns={
+                                'item_name': 'Item',
+                                'quantity': 'Qty (kg)',
+                                'rate': 'Rate (₹/kg)'
+                            }),
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                        total = items['Amount'].sum()
+                        st.markdown(f"### **Total: ₹{total:,.2f}**")
                     
                     if st.button("🔄 Reactivate", key=f"reactivate_{order['id']}"):
-                        update_order_status(order['id'], 'Active')
-                        st.rerun()
+                        if update_order_status(order['id'], 'Active'):
+                            st.success("Order reactivated!")
+                            st.rerun()
         else:
             st.info("No completed orders found!")
 
@@ -411,40 +472,43 @@ elif page == "📦 Inventory":
     
     items_df = get_all_items()
     
-    st.subheader("Update Stock Levels")
-    
-    for _, item in items_df.iterrows():
-        col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+    if len(items_df) > 0:
+        st.subheader("Update Stock Levels")
         
-        with col1:
-            st.write(f"**{item['name']}**")
+        for idx, item in items_df.iterrows():
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            
+            with col1:
+                st.write(f"**{item['name']}**")
+            
+            with col2:
+                st.write(f"₹{item['rate']}/kg")
+            
+            with col3:
+                current_stock = item['stock']
+                new_stock = st.number_input(
+                    "Stock (kg)", 
+                    min_value=0.0, 
+                    value=float(current_stock),
+                    step=0.5,
+                    key=f"stock_{idx}",
+                    label_visibility="collapsed"
+                )
+            
+            with col4:
+                if st.button("💾", key=f"save_{idx}", help="Save"):
+                    if new_stock != current_stock:
+                        if update_stock(item['name'], new_stock):
+                            st.success("✅")
+                            st.rerun()
         
-        with col2:
-            st.write(f"₹{item['rate']}/kg")
+        st.divider()
         
-        with col3:
-            current_stock = item['stock']
-            new_stock = st.number_input(
-                "Stock (kg)", 
-                min_value=0.0, 
-                value=float(current_stock),
-                step=0.5,
-                key=f"stock_{item['id']}",
-                label_visibility="collapsed"
-            )
-        
-        with col4:
-            if st.button("💾", key=f"save_{item['id']}", help="Save"):
-                if new_stock != current_stock:
-                    update_stock(item['name'], new_stock)
-                    st.success("✅")
-    
-    st.divider()
-    
-    # Stock summary
-    st.subheader("📊 Stock Summary")
-    total_stock_value = (items_df['stock'] * items_df['rate']).sum()
-    st.metric("Total Inventory Value", f"₹{total_stock_value:,.2f}")
+        st.subheader("📊 Stock Summary")
+        total_stock_value = (items_df['stock'] * items_df['rate']).sum()
+        st.metric("Total Inventory Value", f"₹{total_stock_value:,.2f}")
+    else:
+        st.warning("No items found in inventory!")
 
 # Stock Analysis Page
 elif page == "📈 Stock Analysis":
@@ -452,43 +516,45 @@ elif page == "📈 Stock Analysis":
     
     analysis_df = get_stock_vs_orders()
     
-    st.subheader("Current Status")
-    
-    for _, item in analysis_df.iterrows():
-        col1, col2, col3, col4 = st.columns(4)
+    if len(analysis_df) > 0:
+        st.subheader("Current Status")
         
-        with col1:
-            st.write(f"**{item['name']}**")
+        for _, item in analysis_df.iterrows():
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.write(f"**{item['name']}**")
+            
+            with col2:
+                st.metric("Available", f"{item['stock']:.1f} kg")
+            
+            with col3:
+                st.metric("Required", f"{item['required']:.1f} kg")
+            
+            with col4:
+                diff = item['difference']
+                if diff < 0:
+                    st.metric("Status", f"{abs(diff):.1f} kg", delta=f"Short", delta_color="inverse")
+                elif diff < 5:
+                    st.metric("Status", f"+{diff:.1f} kg", delta="Low", delta_color="off")
+                else:
+                    st.metric("Status", f"+{diff:.1f} kg", delta="OK", delta_color="normal")
+            
+            st.divider()
         
-        with col2:
-            st.metric("Available", f"{item['stock']:.1f} kg")
+        shortage_items = analysis_df[analysis_df['difference'] < 5]
         
-        with col3:
-            st.metric("Required", f"{item['required']:.1f} kg")
-        
-        with col4:
-            diff = item['difference']
-            if diff < 0:
-                st.metric("Status", f"{abs(diff):.1f} kg", delta=f"Short", delta_color="inverse")
-            elif diff < 5:
-                st.metric("Status", f"+{diff:.1f} kg", delta="Low", delta_color="off")
-            else:
-                st.metric("Status", f"+{diff:.1f} kg", delta="OK", delta_color="normal")
-        
-        st.divider()
-    
-    # Shopping list
-    shortage_items = analysis_df[analysis_df['difference'] < 5]
-    
-    if len(shortage_items) > 0:
-        st.subheader("🛒 Shopping List")
-        st.info("Items to purchase/prepare:")
-        
-        for _, item in shortage_items.iterrows():
-            needed = max(0, 10 - item['stock'])  # Keep buffer of 10kg
-            st.write(f"- **{item['name']}**: {needed:.1f} kg")
+        if len(shortage_items) > 0:
+            st.subheader("🛒 Shopping List")
+            st.info("Items to purchase/prepare:")
+            
+            for _, item in shortage_items.iterrows():
+                needed = max(0, 10 - item['stock'])
+                st.write(f"- **{item['name']}**: {needed:.1f} kg")
+    else:
+        st.warning("No stock data available!")
 
 # Footer
 st.sidebar.divider()
-st.sidebar.info("🪔 **Diwali Snacks Order Manager**\n\nBuilt with Python & Streamlit")
+st.sidebar.success("🔒 **Data is Safe in Google Sheets!**")
 st.sidebar.caption(f"Last updated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
