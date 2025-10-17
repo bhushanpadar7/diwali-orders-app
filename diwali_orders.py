@@ -59,17 +59,17 @@ ORDERS_DATA = """Order_ID,Customer_Name,Phone,Address,Delivery_Date,Status,Payme
 13,Wavage Saheb,,Amravati,10/20/2025,Active,Pending,10/11/2025,
 14,Thakur Saheb,,Amravati,10/20/2025,Active,Pending,10/11/2025,
 15,Meenal Thakare Madam,,Amravati,10/20/2025,Active,Pending,10/11/2025,
-16,Wadve Sir,,Amravati,10/17/2025,Active,Pending,10/11/2025,
-17,Pradnya Madam Ingle,,Amravati,10/17/2025,Active,Pending,10/11/2025,
+16,Wadve Sir,,Amravati,10/17/2025,Completed,Pending,10/11/2025,
+17,Pradnya Madam Ingle,,Amravati,10/17/2025,Completed,Pending,10/11/2025,
 18,Ambore Madam,,Amravati,10/18/2025,Active,Pending,10/11/2025,
-19,Kate Sir,,Amravati,10/18/2025,Active,Pending,10/11/2025,
+19,Kate Sir,,Amravati,10/18/2025,Completed,Pending,10/11/2025,
 20,Girase Madam,,Amravati,10/19/2025,Active,Pending,10/11/2025,
-21,Sonal Pachange,,Amravati,10/17/2025,Active,Pending,10/11/2025,
+21,Sonal Pachange,,Amravati,10/17/2025,Completed,Pending,10/11/2025,
 22,Thoke Sir,,Amravati,10/19/2025,Active,Pending,10/11/2025,
 23,Sunil Bhau Bhonde,,Amravati,10/19/2025,Active,Pending,10/11/2025,
 24,Yogesh Bhau,,Amravati,10/19/2025,Active,Pending,10/11/2025,
-25,Pradnya Madam Ingle(Friend),,Amravati,10/17/2025,Active,Pending,10/11/2025,
-26,Yeole Madam,,Amravati,10/18/2025,Active,Pending,10/11/2025,
+25,Pradnya Madam Ingle(Friend),,Amravati,10/17/2025,Completed,Pending,10/11/2025,
+26,Yeole Madam,,Amravati,10/18/2025,Completed,Pending,10/11/2025,
 27,Anagha Ronghe,,Amravati,10/19/2025,Active,Pending,10/11/2025,
 28,Sonam Savde,,Amravati,10/19/2025,Active,Pending,10/11/2025,
 29,Sunanda Kaldate,,Amravati,10/19/2025,Active,Pending,10/11/2025,
@@ -550,3 +550,4 @@ st.sidebar.divider()
 st.sidebar.success("🎉 **Data Embedded in Code!**")
 st.sidebar.info("To add new orders:\n1. Edit the data strings in code\n2. Redeploy app\n3. Data updates automatically!")
 st.sidebar.caption(f"Last updated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
+
