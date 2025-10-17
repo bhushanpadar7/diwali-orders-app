@@ -31,16 +31,16 @@ st.markdown("""
 # EMBEDDED DATA - Your CSV data directly in code!
 
 ITEMS_DATA = """Item_Name,Rate,Stock,Value
-Besan Laddu,580,16,9280
+Besan Laddu,580,10,5800
 Chakli,400,8,3200
-Shev (Masala),380,8.5,3230
-Shev(Thin),380,8.5,3230
-Shankarpade(Salty),380,6.5,2470
-Shankarpade(Sweet),380,5,1900
+Shev (Masala),380,6.5,2470
+Shev(Thin),380,6,2280
+Shankarpade(Salty),380,4.75,1805
+Shankarpade(Sweet),380,1,380
 Chivda,290,10,2900
 Anarse,720,0,0
-Karanji (Pitthi),540,1,540
-Karanji (Ola Naral),540,0.5,270
+Karanji (Pitthi),540,0,0
+Karanji (Ola Naral),540,0,0
 Rava Laddu,400,1,400"""
 
 ORDERS_DATA = """Order_ID,Customer_Name,Phone,Address,Delivery_Date,Status,Payment,Order_Date,Notes
@@ -550,4 +550,5 @@ st.sidebar.divider()
 st.sidebar.success("🎉 **Data Embedded in Code!**")
 st.sidebar.info("To add new orders:\n1. Edit the data strings in code\n2. Redeploy app\n3. Data updates automatically!")
 st.sidebar.caption(f"Last updated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
+
 
