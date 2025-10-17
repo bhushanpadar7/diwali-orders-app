@@ -74,7 +74,8 @@ ORDERS_DATA = """Order_ID,Customer_Name,Phone,Address,Delivery_Date,Status,Payme
 28,Sonam Savde,,Amravati,10/19/2025,Active,Pending,10/11/2025,
 29,Sunanda Kaldate,,Amravati,10/19/2025,Active,Pending,10/11/2025,
 30,Snehal Ingle,,Amravati,10/19/2025,Active,Pending,10/11/2025,
-31,Minakshi Bole,,Amravati,10/19/2025,Active,Pending,10/11/2025"""
+31,Minakshi Bole,,Amravati,10/19/2025,Active,Pending,10/11/2025
+32,Patil Kaku,,Amravati,10/18/2025,Active,Pending,10/12/2025"""
 
 ORDER_ITEMS_DATA = """Order_ID,Item_Name,quantity,rate,Amount
 1,Shev (Masala),0.25,380,95
@@ -193,7 +194,9 @@ ORDER_ITEMS_DATA = """Order_ID,Item_Name,quantity,rate,Amount
 31,Shankarpade(Salty),0.5,380,190
 31,Shankarpade(Sweet),0.5,380,190
 31,Chakli,0.5,400,200
-31,Chivda,0.5,290,145"""
+31,Chivda,0.5,290,145
+32,Besan Laddu,0.5,580,290
+32,Karanji (Ola Naral),0.5,540,270"""
 
 # Load data into DataFrames
 @st.cache_data
@@ -550,5 +553,6 @@ st.sidebar.divider()
 st.sidebar.success("🎉 **Data Embedded in Code!**")
 st.sidebar.info("To add new orders:\n1. Edit the data strings in code\n2. Redeploy app\n3. Data updates automatically!")
 st.sidebar.caption(f"Last updated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
+
 
 
